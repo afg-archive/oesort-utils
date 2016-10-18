@@ -46,8 +46,9 @@ def judge(filename, timeout):
         executable = filename
 
     if not os.path.exists(executable):
-        raise SystemExit('The executable {!r} does not exist'.format(
-            executable))
+        raise SystemExit(
+            'The executable {!r} does not exist'.format(executable)
+        )
 
     if os.path.exists('_judge_output'):
         shutil.rmtree('_judge_output')
@@ -56,30 +57,37 @@ def judge(filename, timeout):
     summary = []
 
     for i in range(1, 11):
+        print('-' * 79)
         input_file = 'testcase/testcase{}'.format(i)
         output_file = '_judge_output/output{}'.format(i)
         sorted_file = 'testcase/sorted{}'.format(i)
         with open('testcase/submit{}.sh'.format(i)) as file:
             submit_script = file.read()
         datasize = int(
-            re.search(r'mpiexec \./\$exe (\d+)', submit_script).group(1))
+            re.search(r'mpiexec \./\$exe (\d+)', submit_script).group(1)
+        )
         nodes, ppn = map(
             int,
-            re.search(r'PBS -l nodes=(\d+):ppn=(\d+)', submit_script).groups())
+            re.search(r'PBS -l nodes=(\d+):ppn=(\d+)', submit_script).groups()
+        )
         command = list(
-            map(str, ('mpirun', '-np', str(nodes * ppn), executable, datasize,
-                      input_file, output_file)))
+            map(
+                str, (
+                    'mpirun', '-np', str(nodes * ppn), executable, datasize,
+                    input_file, output_file
+                )
+            )
+        )
         print_command(command)
         start_time = time.perf_counter()
         try:
-            subprocess.run(command,
-                           check=True,
-                           start_new_session=True,
-                           timeout=timeout)
+            subprocess.run(
+                command, check=True, start_new_session=True, timeout=timeout
+            )
         except subprocess.TimeoutExpired:
             verdict = red('Timed Out')
-        except subprocess.CalledProcessError:
-            verdict = red('Runtime Error')
+        except subprocess.CalledProcessError as e:
+            verdict = red('Runtime Error ({})'.format(e.returncode))
         else:
             try:
                 cmp = filecmp.cmp(output_file, sorted_file, shallow=False)
@@ -92,17 +100,24 @@ def judge(filename, timeout):
                     verdict = red('Wrong Answer')
         finally:
             end_time = time.perf_counter()
-        print('{:24}  {:6.3f}'.format(verdict, end_time - start_time))
+        print(
+            'testcase{:<2}  {:30}  {:6.3f}'.
+            format(i, verdict, end_time - start_time)
+        )
         summary.append((i, verdict, end_time - start_time))
     print('=' * 79)
     for i, verdict, duration in summary:
-        print('testcase{:<2}  {:24}  {:6.3f}'.format(i, verdict, duration))
+        print(
+            'testcase{:<2}  {:30}  {:6.3f}'.format(i, verdict, duration)
+        )
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument('filename', help='path to executable or source file')
     parser.add_argument(
-        '--timeout', type=float, default=60., help='timeout on each test')
+        '--timeout', type=float, default=60., help='timeout on each test'
+    )
     judge(**vars(parser.parse_args()))

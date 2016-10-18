@@ -7,6 +7,7 @@ import filecmp
 import subprocess
 import argparse
 import time
+import signal
 
 * 'Please, be nice and use Python 3.5 or later',
 
@@ -59,8 +60,10 @@ def get_int_count(size_with_units):
             return int(value) * UNITS[unit] // 4
         else:
             if int(size_with_units) % 4:
-                raise SystemExit('{} is not a multiple of sizeof(int)'.format(
-                    size_with_units))
+                raise SystemExit(
+                    '{} is not a multiple of sizeof(int)'.
+                    format(size_with_units)
+                )
             return int(size_with_units) // 4
     except ValueError:
         raise SystemExit('{} is not a valid size'.format(size_with_units))
@@ -70,7 +73,8 @@ def bench(filename, timeout, nps, sizes):
     if os.path.exists('_bench_output'):
         try:
             input(
-                '_bench_output/ exists, [Enter] to remove or [Ctrl+C] to abort')
+                '_bench_output/ exists, [Enter] to remove or [Ctrl+C] to abort'
+            )
         except KeyboardInterrupt:
             print()
             raise SystemExit(1)
@@ -85,12 +89,14 @@ def bench(filename, timeout, nps, sizes):
     executable = handle_source_file(filename)
 
     if not os.path.exists(executable):
-        raise SystemExit('The executable {!r} does not exist'.format(
-            executable))
+        raise SystemExit(
+            'The executable {!r} does not exist'.format(executable)
+        )
 
     summary = []
-    header = 'size  {}'.format('  '.join('np={}'.format(np).rjust(6)
-                                         for np in nps))
+    header = 'size  {}'.format(
+        '  '.join('np={}'.format(np).rjust(6) for np in nps)
+    )
 
     if not os.path.isdir('testcase_benchmark'):
         os.mkdir('testcase_benchmark')
@@ -101,16 +107,19 @@ def bench(filename, timeout, nps, sizes):
         for size, datasize in zip(sizes, datasizes):
             input_file = 'testcase_benchmark/testcase_{}'.format(size)
             if not os.path.exists(input_file) or os.stat(
-                    input_file).st_size != datasize * 4:
+                    input_file
+            ).st_size != datasize * 4:
                 mrtcmd = [
-                    'reference/make_random_testcase', input_file, str(datasize)
+                    'reference/make_random_testcase', input_file,
+                    str(datasize)
                 ]
                 print_command(mrtcmd)
                 subprocess.run(mrtcmd, check=True)
 
             sorted_file = 'testcase_benchmark/sorted_{}'.format(size)
             if not os.path.exists(sorted_file) or os.stat(
-                    sorted_file).st_size != datasize * 4:
+                    sorted_file
+            ).st_size != datasize * 4:
                 refsolcmd = [
                     'reference/gcc_parallel_sort', str(datasize),
                     str(input_file), str(sorted_file)
@@ -123,48 +132,61 @@ def bench(filename, timeout, nps, sizes):
             for np in nps:
                 output_file = '_bench_output/{}_{}_output'.format(size, np)
                 print(
-                    end='size={:<5}  np={:<3}  '.format(size, np), flush=True)
+                    end='size={:>5}   np={:>3}   '.format(size, np), flush=True
+                )
                 command = list(
-                    map(str, ('mpirun', '-np', str(
-                        np), '-hostfile', 'hostfile', executable, datasize,
-                              input_file, output_file)))
-                start_time = time.perf_counter()
-                try:
-                    with open(
-                            '_bench_output/{}_{}_stdout'.format(size, np),
-                            'wb') as stdout, open(
-                                '_bench_output/{}_{}_stderr'.format(size, np),
-                                'wb') as stderr:
-                        subprocess.run(command,
-                                       check=True,
-                                       start_new_session=True,
-                                       timeout=timeout,
-                                       stdout=stdout,
-                                       stderr=stderr)
-                except subprocess.TimeoutExpired:
-                    verdict = red('Timed Out')
-                    short = red('TLE'.rjust(6))
-                except subprocess.CalledProcessError:
-                    verdict = red('Runtime Error')
-                    short = red('RE'.rjust(6))
-                else:
+                    map(
+                        str, (
+                            'mpirun', '-np', str(np), '-hostfile', 'hostfile',
+                            executable, datasize, input_file, output_file
+                        )
+                    )
+                )
+                with open(
+                        '_bench_output/{}_{}_stdout'.format(size, np), 'wb'
+                ) as stdout, open(
+                        '_bench_output/{}_{}_stderr'.format(size, np), 'wb'
+                ) as stderr:
+                    start_time = time.perf_counter()
+                    process = subprocess.Popen(
+                        command,
+                        start_new_session=True,
+                        stdout=stdout,
+                        stderr=stderr
+                    )
                     try:
-                        cmp = filecmp.cmp(output_file,
-                                          sorted_file,
-                                          shallow=False)
-                    except FileNotFoundError:
-                        verdict = red('No Output')
-                        short = red('NO'.rjust(6))
+                        returncode = process.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        end_time = time.perf_counter()
+                        process.send_signal(signal.SIGINT)
+                        verdict = red('Timed Out')
+                        short = red('TLE').rjust(17)
                     else:
-                        if cmp:
-                            verdict = green('Accepted')
-                            short = None
+                        end_time = time.perf_counter()
+                        if returncode != 0:
+                            verdict = red(
+                                'Runtime Error ({})'.format(returncode)
+                            )
+                            short = red('RE{:3d}'.format(returncode)).rjust(17)
                         else:
-                            verdict = red('Wrong Answer')
-                            short = red('WA'.rjust(6))
-                finally:
-                    end_time = time.perf_counter()
-                print('{:24}  {:6.3f}'.format(verdict, end_time - start_time))
+                            try:
+                                cmp = filecmp.cmp(
+                                    output_file, sorted_file, shallow=False
+                                )
+                            except FileNotFoundError:
+                                verdict = red('No Output')
+                                short = red('NO').rjust(17)
+                            else:
+                                if cmp:
+                                    verdict = green('Accepted')
+                                    short = None
+                                else:
+                                    verdict = red('Wrong Answer')
+                                    short = red('WA').rjust(17)
+                print(
+                    '{:30}  time={:6.3f}'.
+                    format(verdict, end_time - start_time)
+                )
                 if short is None:
                     short = format(end_time - start_time, '6.3f')
                 else:
@@ -186,17 +208,21 @@ def bench(filename, timeout, nps, sizes):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument('filename', help='path to executable or source file')
     parser.add_argument(
-        '--timeout', type=float, default=60., help='timeout on each test')
+        '--timeout', type=float, default=60., help='timeout on each test'
+    )
     parser.add_argument(
         '--np',
         type=int,
         nargs='+',
         default=[1, 2, 4, 8, 16, 32],
-        help='number of processes')
+        help='number of processes'
+    )
     parser.add_argument(
-        '--size', nargs='+', default=SIZES, help='input size, in K, M, or G')
+        '--size', nargs='+', default=SIZES, help='input size, in K, M, or G'
+    )
     args = parser.parse_args()
     bench(args.filename, args.timeout, args.np, args.size)
